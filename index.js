@@ -4,19 +4,26 @@ const callbacks = new Set();
 let isCalled = false;
 let isRegistered = false;
 
-function exit(exit, signal) {
+function exit(originalEvent, exit, exitCode, err) {
 	if (isCalled) {
 		return;
 	}
 
 	isCalled = true;
 
+	// console.log('exit-hook', { originalEvent, exit, exitCode, err })
+
+	if (err instanceof Error) {
+		console.error(err.stack);
+	}
+
 	for (const callback of callbacks) {
-		callback();
+		callback(originalEvent);
 	}
 
 	if (exit === true) {
-		process.exit(128 + signal); // eslint-disable-line unicorn/no-process-exit
+		console.log(`exit-hook: process.exit(${exitCode})`)
+		process.exit(exitCode); // eslint-disable-line unicorn/no-process-exit
 	}
 }
 
@@ -26,18 +33,22 @@ module.exports = callback => {
 	if (!isRegistered) {
 		isRegistered = true;
 
-		process.once('exit', exit);
-		process.once('SIGINT', exit.bind(null, true, 2));
-		process.once('SIGTERM', exit.bind(null, true, 15));
+		process.once('exit', exit.bind(null, 'exit'));
+		process.once('beforeExit', exit.bind(null, 'beforeExit'));
+		process.once('SIGINT', exit.bind(null, 'SIGINT', true, 2 + 128));
+		process.once('SIGTERM', exit.bind(null, 'SIGTERM', true, 15 + 128));
+		process.once('uncaughtException', exit.bind(null, 'uncaughtException', true, 1));
+		process.once('unhandledRejection', exit.bind(null, 'unhandledRejection', true, 1));
 
 		// PM2 Cluster shutdown message. Caught to support async handlers with pm2, needed because
 		// explicitly calling process.exit() doesn't trigger the beforeExit event, and the exit
 		// event cannot support async handlers, since the event loop is never called after it.
-		process.on('message', message => {
-			if (message === 'shutdown') {
-				exit(true, -128);
-			}
-		});
+
+		// process.on('message', message => {
+		//   if (message === 'shutdown') {
+		//     exit('message', true, -128);
+		//   }
+		// });
 	}
 
 	return () => {
